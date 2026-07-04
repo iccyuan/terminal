@@ -184,6 +184,14 @@ void PtySignalInputThread::_DoResizeWindow(const ResizeWindowData& data)
     }
 
     _api.ResizeWindow(data.sx, data.sy);
+
+    // anyTerminal patch (microsoft/terminal#18725, PR#19089 re-land): after a resize,
+    // ConPTY's reflow may differ from the connected terminal's, so the cursor position
+    // ConPTY reports via GetConsoleCursorInfo can be wrong (the "PowerShell prompt
+    // displacement / 历史内容和新输入重叠" on take-over). Ask the terminal where ITS cursor
+    // is now and adopt it, so the two agree.
+    auto& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
+    gci.GetVtIo()->RequestCursorPositionFromTerminal();
 }
 
 void PtySignalInputThread::_DoClearBuffer(const bool keepCursorRow) const
