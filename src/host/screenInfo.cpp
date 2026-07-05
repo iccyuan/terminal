@@ -1391,6 +1391,27 @@ NT_CATCH_RETURN()
     {
         SetConptyCursorPositionMayBeWrong();
 
+        // anyTerminal (microsoft/terminal#18725 残留死角): upstream only re-syncs the
+        // ConPTY cursor LAZILY — it emits DSR CPR when an app READS the cursor
+        // (GetConsoleScreenBufferInfoEx). That misses the "full-screen app exits, then a
+        // rapid 128->76->128 take-over resize round-trip, then the user types" sequence:
+        // nothing reads the cursor between the resizes and the keystroke, so PSReadLine
+        // recomputes its edit-line anchor from its own (drifted) state and the input lands
+        // several rows above the live prompt (splattered onto the exited app's leftovers).
+        // Fix: emit DSR CPR EAGERLY right after every resize (fire-and-forget, no blocking
+        // wait — unlike WaitForConptyCursorPositionToBeSynchronized), so the terminal's
+        // authoritative cursor comes back and corrects ConPTY before the app next acts. The
+        // lazy WaitFor path stays as a fallback (the flag remains set until the reply). This
+        // is the eager behavior our original re-land of #19089 had; upstream's lazy version
+        // is cleaner but has this hole. Safe under the console lock (held here): identical to
+        // VtIo::StartIfNeeded emitting DSR CPR at connect, and to other GetVtWriterForBuffer
+        // callers. See third_party/conpty/ANYTERMINAL_OPENCONSOLE_PATCH.md.
+        if (auto writer = ServiceLocator::LocateGlobals().getConsoleInformation().GetVtWriterForBuffer(this))
+        {
+            writer.WriteDSRCPR();
+            writer.Submit();
+        }
+
         // Fire off an event to let accessibility apps know the layout has changed.
         if (IsActiveScreenBuffer())
         {
